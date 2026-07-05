@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meshtastic CYD Simulator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+      "react-dom": "https://esm.sh/react-dom@18.3.1",
+      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+      "lucide-react": "https://esm.sh/lucide-react@0.400.0?external=react,react-dom"
+    }
+  }
+  </script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+    }
+    body {
+      background-color: #0f172a;
+      color: #94a3b8;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    #cyd-frame {
+      width: 420px;
+      height: 340px;
+      background: #1e293b;
+      border: 12px solid #334155;
+      border-radius: 24px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #screen {
+      width: 320px;
+      height: 240px;
+      background: #000;
+      overflow: hidden;
+      position: relative;
+      user-select: none;
+      cursor: crosshair;
+    }
+    /* CRT Scanline effect */
+    #screen::after {
+      content: " ";
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+      z-index: 100;
+      background-size: 100% 2px, 3px 100%;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="cyd-frame">
+    <div id="screen"></div>
+  </div>
+
+  <script type="text/babel" data-type="module" data-presets="react">
+    import React, { useState, useEffect, useRef } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { 
+      Signal, Battery, MessageSquare, List, Map as MapIcon, 
+      Send, User, Clock, ArrowRight, Share2, Keyboard as KeyboardIcon,
+      Wifi, Zap, ChevronLeft, ChevronRight, Delete
+    } from 'lucide-react';
+
+    const CYDApp = () => {
+      const [view, setView] = useState('nodes'); // nodes, chat, traceroute, map, settings, keyboard
+      const [messages, setMessages] = useState([
+        { id: 1, sender: 'Alpha', text: 'Node online', time: '12:01' },
+        { id: 2, sender: 'Bravo', text: 'Copy that', time: '12:05' }
+      ]);
+      const [nodes, setNodes] = useState([
+        { id: '!1a2b3c4d', name: 'Base-01', snr: 5.2, bat: 85, dist: '0.2km', last: '2m' },
+        { id: '!5e6f7g8h', name: 'Mobile-A', snr: -2.1, bat: 42, dist: '1.5km', last: '5m' },
+        { id: '!9i0j1k2l', name: 'Repeater-X', snr: 10.4, bat: 99, dist: '5.2km', last: '12s' },
+      ]);
+      const [inputText, setInputText] = useState('');
+      const [targetNode, setTargetNode] = useState(null);
+
+      const renderHeader = () => (
+        <div className="h-6 bg-slate-900 flex items-center justify-between px-2 text-[10px] border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <Wifi size={10} className="text-emerald-500" />
+            <span className="text-emerald-500 font-bold">MESH:OK</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Battery size={10} className="text-emerald-500" />
+            <span>4.18V</span>
+          </div>
+        </div>
+      );
+
+      const renderNavBar = () => (
+        <div className="h-8 bg-slate-900 border-t border-slate-800 flex justify-around items-center">
+          <button onClick={() => setView('nodes')} className={`p-1 ${view === 'nodes' ? 'text-emerald-400' : 'text-slate-500'}`}>
+            <List size={18} />
+          </button>
+          <button onClick={() => setView('chat')} className={`p-1 ${view === 'chat' ? 'text-emerald-400' : 'text-slate-500'}`}>
+            <MessageSquare size={18} />
+          </button>
+          <button onClick={() => setView('traceroute')} className={`p-1 ${view === 'traceroute' ? 'text-emerald-400' : 'text-slate-500'}`}>
+            <Share2 size={18} />
+          </button>
+        </div>
+      );
+
+      const NodeList = () => (
+        <div className="flex-1 overflow-y-auto bg-black text-[10px]">
+          <table className="w-full text-left">
+            <thead className="bg-slate-900 text-slate-500 sticky top-0">
+              <tr>
+                <th className="p-1 px-2">NODE</th>
+                <th className="p-1 text-center">SNR</th>
+                <th className="p-1 text-center">BAT</th>
+                <th className="p-1 text-right px-2">DIST</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nodes.map(node => (
+                <tr key={node.id} onClick={() => {setTargetNode(node); setView('chat');}} className="border-b border-slate-900 active:bg-slate-800">
+                  <td className="p-1 px-2 font-bold text-slate-200">{node.name}</td>
+                  <td className={`p-1 text-center ${node.snr > 0 ? 'text-emerald-400' : 'text-orange-400'}`}>{node.snr}</td>
+                  <td className="p-1 text-center">{node.bat}%</td>
+                  <td className="p-1 text-right px-2 text-slate-400">{node.dist}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+
+      const ChatView = () => (
+        <div className="flex-1 flex flex-col bg-black overflow-hidden">
+          <div className="bg-slate-900 p-1 px-2 text-[10px] flex justify-between items-center border-b border-slate-800">
+            <span className="text-emerald-400 font-bold truncate">TO: {targetNode?.name || 'GLOBAL'}</span>
+            <span className="text-slate-500">{targetNode?.id}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-1 space-y-2 text-[10px]">
+            {messages.map(m => (
+              <div key={m.id} className="flex flex-col">
+                <div className="flex justify-between items-center text-[8px] text-slate-500">
+                  <span>{m.sender}</span>
+                  <span>{m.time}</span>
+                </div>
+                <div className="bg-slate-900 p-1 px-2 rounded-sm border-l-2 border-emerald-500">
+                  {m.text}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="p-1 flex gap-1">
+            <button 
+              onClick={() => setView('keyboard')}
+              className="flex-1 bg-slate-800 border border-slate-700 h-6 px-2 text-[10px] flex items-center text-slate-400 text-left"
+            >
+              {inputText || 'Tap to type...'}
+            </button>
+            <button className="bg-emerald-600 w-8 h-6 flex items-center justify-center rounded-sm active:bg-emerald-500">
+              <Send size={12} className="text-white" />
+            </button>
+          </div>
+        </div>
+      );
+
+      const Keyboard = () => {
+        const rows = [
+          ['1','2','3','4','5','6','7','8','9','0'],
+          ['Q','W','E','R','T','Y','U','I','O','P'],
+          ['A','S','D','F','G','H','J','K','L'],
+          ['Z','X','C','V','B','N','M', 'BACK']
+        ];
+
+        const handleKey = (key) => {
+          if (key === 'BACK') {
+            setInputText(prev => prev.slice(0, -1));
+          } else {
+            setInputText(prev => prev + key);
+          }
+        };
+
+        return (
+          <div className="flex-1 bg-slate-950 flex flex-col">
+            <div className="h-8 bg-slate-900 p-1 flex items-center justify-between">
+              <span className="text-[10px] text-emerald-400 ml-1 truncate flex-1">{inputText || 'Type message...'}</span>
+              <button 
+                onClick={() => setView('chat')}
+                className="bg-emerald-600 px-3 h-6 text-[10px] text-white font-bold rounded-sm ml-2"
+              >
+                OK
+              </button>
+            </div>
+            <div className="flex-1 flex flex-col justify-around p-0.5 pb-1">
+              {rows.map((row, i) => (
+                <div key={i} className="flex justify-center gap-0.5">
+                  {row.map(key => (
+                    <button
+                      key={key}
+                      onClick={() => handleKey(key)}
+                      className={`
+                        h-8 flex items-center justify-center text-[10px] font-bold rounded-sm border border-slate-800 active:bg-slate-600
+                        ${key === 'BACK' ? 'w-12 bg-red-900/50 text-red-400' : 'flex-1 bg-slate-800 text-slate-200'}
+                      `}
+                    >
+                      {key === 'BACK' ? <Delete size={12}/> : key}
+                    </button>
+                  ))}
+                </div>
+              ))}
+              <div className="flex justify-center gap-0.5">
+                <button onClick={() => handleKey(' ')} className="h-8 flex-1 bg-slate-800 border border-slate-800 rounded-sm text-[10px] font-bold active:bg-slate-600">SPACE</button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const Traceroute = () => (
+        <div className="flex-1 bg-black flex flex-col p-2 text-[10px]">
+          <div className="text-emerald-500 font-bold mb-2">TRACEROUTE: !5e6f7g8h</div>
+          <div className="space-y-4 relative">
+            <div className="absolute left-3 top-2 bottom-2 w-px bg-slate-800"></div>
+            {[
+              { name: 'LOCAL (Me)', snr: '--' },
+              { name: 'Repeater-X', snr: '8.5' },
+              { name: 'Mobile-A', snr: '-2.1' },
+            ].map((hop, i, arr) => (
+              <div key={i} className="flex items-center gap-3 relative z-10">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${i === 0 ? 'bg-emerald-900 border-emerald-500' : 'bg-slate-900 border-slate-700'}`}>
+                  {i === 0 ? <User size={10} className="text-emerald-400" /> : <Zap size={10} className="text-slate-400" />}
+                </div>
+                <div className="flex-1 bg-slate-900 p-1 border border-slate-800 rounded flex justify-between">
+                  <span>{hop.name}</span>
+                  <span className="text-slate-500">{hop.snr} dB</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="mt-auto bg-slate-800 h-8 border border-slate-700 text-slate-300 active:bg-slate-700">NEW TRACE</button>
+        </div>
+      );
+
+      return (
+        <div className="w-[320px] h-[240px] flex flex-col bg-black text-slate-300">
+          {renderHeader()}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {view === 'nodes' && <NodeList />}
+            {view === 'chat' && <ChatView />}
+            {view === 'keyboard' && <Keyboard />}
+            {view === 'traceroute' && <Traceroute />}
+          </div>
+          {view !== 'keyboard' && renderNavBar()}
+        </div>
+      );
+    };
+
+    const root = createRoot(document.getElementById('screen'));
+    root.render(<CYDApp />);
+  </script>
+</body>
+</html>

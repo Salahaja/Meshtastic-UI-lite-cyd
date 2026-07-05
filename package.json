@@ -1,0 +1,8 @@
+{
+  "name": "meshtastic-cyd-firmware",
+  "type": "module",
+  "dependencies": {
+    "hono": "^4.6.0",
+    "lucide-react": "^0.400.0"
+  }
+}
